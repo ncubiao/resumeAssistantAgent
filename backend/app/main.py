@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import match, optimize, resume
+from app.api import chat, match, optimize, resume
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.utils.llm_client import llm_client
@@ -30,6 +30,7 @@ app.add_middleware(
 app.include_router(resume.router, prefix="/api/v1/resumes", tags=["resumes"])
 app.include_router(match.router, prefix="/api/v1/matches", tags=["matches"])
 app.include_router(optimize.router, prefix="/api/v1/optimize", tags=["optimize"])
+app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
 
 
 @app.get("/health", tags=["health"])
@@ -51,15 +52,25 @@ async def llm_health_check() -> dict:
     - api_key 是否已配置（不回传 key 本身）
     - 依赖是否可导入
     """
+    key = settings.llm_api_key or ""
+    key_masked = key[:8] + "***" if len(key) > 8 else "(empty)"
     return {
         "provider": llm_client.provider,
         "model": llm_client.model,
         "base_url": llm_client.base_url,
-        "api_key_configured": bool(llm_client.api_key) and "你的" not in (llm_client.api_key or ""),
+        "api_key_configured": bool(key),
+        "api_key_preview": key_masked,
+        "api_key_passes_check": (
+            bool(key)
+            and "你的" not in key
+            and "your" not in key.lower()
+            and key.strip() not in {"sk-", "sk-proj-", "sk-proj-你的xxx"}
+            and len(key.strip()) >= 8
+        ),
         "client_available": llm_client.available,
         "note": (
-            "未配置 key 或依赖缺失时，API 会走启发式 fallback 而不是报错。"
-            " 若要真正测试模型响应，请使用 POST /api/v1/llm/test。"
+            "如果 api_key_passes_check=false，请检查 .env 文件中 LLM_API_KEY。"
+            " 如果 client_available=false，说明 key 被判定为占位符或未配置，模型会走 fallback。"
         ),
     }
 

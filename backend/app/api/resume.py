@@ -14,7 +14,7 @@ from app.services.resume_parser import extract_text
 logger = get_logger("api.resume")
 router = APIRouter()
 
-_SUPPORTED_SUFFIXES = {"pdf", "docx", "doc", "txt", "md"}
+_SUPPORTED_SUFFIXES = {"pdf", "docx", "doc", "txt", "md", "png", "jpg", "jpeg", "webp", "bmp", "gif", "tif", "tiff"}
 
 
 class ParseTextRequest(BaseModel):
@@ -25,7 +25,7 @@ class ParseTextRequest(BaseModel):
     "/upload",
     response_model=ResumeOut,
     status_code=status.HTTP_201_CREATED,
-    summary="上传并解析简历（PDF/Word/TXT）",
+    summary="上传并解析简历（PDF/Word/TXT/图片）",
 )
 async def upload_resume(file: UploadFile = File(...)) -> ResumeOut:
     """上传简历文件 -> 提取文本 -> Parser Agent 结构化。"""
@@ -118,6 +118,6 @@ async def update_resume(resume_id: str, payload: ResumeUpdate) -> ResumeOut:
     raise HTTPException(status_code=501, detail="数据库持久化功能在阶段 2 实现")
 
 
-@router.delete("/{resume_id}", status_code=204, summary="删除简历")
-async def delete_resume(resume_id: str) -> None:
+@router.delete("/{resume_id}", status_code=200, summary="删除简历")
+async def delete_resume(resume_id: str) -> dict:
     raise HTTPException(status_code=501, detail="数据库持久化功能在阶段 2 实现")

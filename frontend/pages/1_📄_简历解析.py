@@ -11,11 +11,11 @@ from components.api_client import api
 st.set_page_config(page_title="📄 简历解析", page_icon="📄", layout="wide")
 
 st.header("📄 简历解析")
-st.caption("上传 PDF / Word 简历，自动提取结构化信息")
+st.caption("上传 PDF / Word / 图片 简历，自动提取结构化信息")
 
 uploaded = st.file_uploader(
     "选择简历文件",
-    type=["pdf", "docx", "doc", "txt"],
+    type=["pdf", "docx", "doc", "txt", "md", "png", "jpg", "jpeg", "webp", "bmp", "gif", "tif", "tiff"],
     accept_multiple_files=False,
 )
 

@@ -46,6 +46,40 @@ class APIClient:
         except Exception:  # noqa: BLE001
             return []
 
+    # ---------- 聊天 Agent ----------
+
+    def chat(
+        self,
+        message: str,
+        resume_file: bytes | None = None,
+        resume_filename: str | None = None,
+        jd_file: bytes | None = None,
+        jd_filename: str | None = None,
+        history: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any] | None:
+        try:
+            data = {"message": message}
+            if history:
+                import json as _json
+
+                data["history"] = _json.dumps(history)
+            files: dict[str, tuple[str, bytes]] = {}
+            if resume_file is not None and resume_filename:
+                files["resume_file"] = (resume_filename, resume_file)
+            if jd_file is not None and jd_filename:
+                files["jd_file"] = (jd_filename, jd_file)
+
+            resp = requests.post(
+                f"{self.base_url}/api/v1/chat",
+                data=data,
+                files=files if files else None,
+                timeout=180,  # Agent 可能串行调用多个 LLM，给更长时间
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
 
 # 全局单例
 api = APIClient()

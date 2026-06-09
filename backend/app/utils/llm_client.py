@@ -93,8 +93,14 @@ class LLMClient:
     def _is_configured(self) -> bool:
         if not self.api_key:
             return False
-        # 形如 "sk-你的xxx"，明显是占位
+        # 形如 "sk-你的xxx" 明显是占位
         if "你的" in self.api_key or "your" in self.api_key.lower():
+            return False
+        # 只有 "sk-" 没填后面的具体内容
+        if self.api_key.strip() in {"sk-", "sk-proj-", "sk-proj-你的xxx"}:
+            return False
+        # 至少要大于 8 个字符
+        if len(self.api_key.strip()) < 8:
             return False
         return True
 
@@ -105,7 +111,12 @@ class LLMClient:
         if self._unavailable:
             return False
         if not self._is_configured():
-            logger.warning("LLM API key not configured - running in stub mode")
+            logger.warning(
+                "LLM API key not configured or looks like placeholder - running in stub mode",
+                provider=self.provider,
+                model=self.model,
+                key_preview=(self.api_key[:8] + "...") if self.api_key else "(empty)",
+            )
             self._unavailable = True
             return False
         try:
@@ -200,6 +211,97 @@ class LLMClient:
 
         messages = self._build_messages(prompt, system=system, history=history)
         return self._call(messages, expect_json=expect_json)
+
+    def invoke_vision(
+        self,
+        image_bytes: bytes,
+        image_format: str,
+        prompt: str,
+        system: str | None = None,
+    ) -> str:
+        """调用视觉模型，输入一张图片 + 一段提示，返回文本回答。
+
+        Args:
+            image_bytes: 图片原始字节
+            image_format: "png" / "jpg" / "jpeg" / "webp" / "bmp" / "gif"
+            prompt: 向 LLM 提问的文本，例如 "请提取图片中的所有文字"
+            system: 可选 system message
+        """
+        client = self._ensure_client()
+        if not client:
+            logger.warning("LLM invoke_vision skipped: client not available")
+            return ""
+
+        # 走 requests 直接构造多模态请求（langchain ChatOpenAI 对 image_url 内容形式的兼容在各版本不一致，
+        # 这里直接构造符合 DashScope/OpenAI Chat Completions 协议的消息，更稳）
+        import base64
+
+        import requests
+
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        fmt = "jpeg" if image_format.lower() in {"jpg", "jpeg"} else image_format.lower()
+        image_url = f"data:image/{fmt};base64,{b64}"
+
+        messages: list[dict[str, Any]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            }
+        )
+
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        last_exc: Exception | None = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                r = requests.post(
+                    f"{self.base_url.rstrip('/')}/chat/completions",
+                    headers=headers,
+                    json=body,
+                    timeout=120,
+                )
+                r.raise_for_status()
+                data = r.json()
+                choices = data.get("choices") or []
+                if not choices:
+                    return ""
+                msg = choices[0].get("message") or {}
+                content = msg.get("content") or ""
+                logger.info(
+                    "LLM vision call finished",
+                    provider=self.provider,
+                    model=self.model,
+                    chars=len(content),
+                    attempt=attempt + 1,
+                )
+                return str(content).strip()
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                logger.warning(
+                    "LLM vision call failed",
+                    attempt=attempt + 1,
+                    error=str(exc),
+                )
+                if attempt < self._max_retries:
+                    time.sleep(self._retry_backoff * (2**attempt))
+        if last_exc is not None:
+            logger.error("LLM vision call finally failed", error=str(last_exc))
+        return ""
 
     def invoke_json(
         self,
