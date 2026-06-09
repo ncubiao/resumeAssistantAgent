@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 忽略大语言模型的本地缓存和日志
+llm_cache/
+logs/
+*.log
+# 如果用了LangChain等框架，忽略其运行时数据
+langchain_data/
+.idea/
+# 项目特定
+/data/uploads/
+/data/vector_index/
+*.bin
+!data/samples/*.pdf
+!data/samples/*.docx
