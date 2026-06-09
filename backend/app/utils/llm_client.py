@@ -1,83 +1,244 @@
 """LLM 客户端封装。
 
-阶段 1：提供统一接口，支持 OpenAI / DeepSeek 风格的 API。
-阶段 3+：在 Agent 节点中被调用。
+统一管理 LLM 调用，支持多家服务商（OpenAI 兼容协议）：
+  - dashscope (阿里云 DashScope / Qwen / 通义千问)
+  - openai
+  - deepseek
+  - 其它任何实现了 OpenAI Chat Completions 协议的服务商
+
+核心功能：
+  1. 懒加载 + 单例
+  2. 支持 system / user message
+  3. 支持 ``response_format="json_object"`` 强制 JSON 输出（DashScope 兼容）
+  4. 简单的指数退避重试
+  5. 未配置 API Key 时自动进入 stub 模式，不抛异常，便于本地开发与测试
+
 """
 from __future__ import annotations
+
+import json
+import time
+from typing import Any
 
 from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger("llm_client")
 
+# 各服务商默认的 base_url（当用户未显式设置时使用）
+_DEFAULT_BASE_URLS: dict[str, str] = {
+    "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "openai": "https://api.openai.com/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+}
+
+# 各服务商常见模型名称（仅用于日志，不参与逻辑）
+_COMMON_MODELS: dict[str, list[str]] = {
+    "dashscope": [
+        "qwen3-vl-plus",
+        "qwen3-coder-plus",
+        "qwen-turbo",
+        "qwen-plus",
+        "qwen-max",
+        "deepseek-v3",
+    ],
+    "openai": ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
+    "deepseek": ["deepseek-chat", "deepseek-reasoner"],
+}
+
 
 class LLMClient:
-    """统一的 LLM 调用封装。"""
+    """统一的 LLM 调用封装（基于 langchain-openai 的 ChatOpenAI）。
+
+    所有通过 OpenAI 兼容协议暴露的服务都可以用它调用，只需正确配置：
+
+    - LLM_PROVIDER
+    - LLM_API_KEY
+    - LLM_MODEL
+    - LLM_BASE_URL (如果 provider 在 _DEFAULT_BASE_URLS 中可以省略)
+    """
 
     def __init__(self) -> None:
-        self.provider = settings.llm_provider
-        self.api_key = settings.llm_api_key
-        self.model = settings.llm_model
-        self.base_url = settings.llm_base_url
-        self.temperature = settings.llm_temperature
-        self.max_tokens = settings.llm_max_tokens
-        self._client = None
+        self.provider: str = (settings.llm_provider or "openai").lower().strip()
+        self.api_key: str = settings.llm_api_key or ""
+        self.model: str = settings.llm_model or ""
+        # 未显式写 base_url 时，用该 provider 的默认值
+        self.base_url: str = settings.llm_base_url or _DEFAULT_BASE_URLS.get(
+            self.provider, "https://api.openai.com/v1"
+        )
+        self.temperature: float = float(getattr(settings, "llm_temperature", 0.2) or 0.2)
+        self.max_tokens: int = int(getattr(settings, "llm_max_tokens", 2048) or 2048)
 
-    # ---------- 懒加载 ----------
+        self._max_retries: int = 2
+        self._retry_backoff: float = 1.0
 
-    def _ensure_client(self):
+        self._client: Any = None
+        # 懒加载过程中是否已经明确 "不可用"（例如缺少 key 或依赖）
+        self._unavailable: bool = False
+
+    # ---------------- 公共属性 ----------------
+
+    @property
+    def available(self) -> bool:
+        """是否已配置并初始化成功。"""
+        return bool(self._ensure_client())
+
+    @property
+    def display_name(self) -> str:
+        """便于日志 / UI 展示的名字。"""
+        return f"{self.provider}:{self.model}"
+
+    # ---------------- 初始化 ----------------
+
+    def _is_configured(self) -> bool:
+        if not self.api_key:
+            return False
+        # 形如 "sk-你的xxx"，明显是占位
+        if "你的" in self.api_key or "your" in self.api_key.lower():
+            return False
+        return True
+
+    def _ensure_client(self) -> Any:
+        """懒加载 ChatOpenAI 客户端；失败或未配置时返回 False。"""
         if self._client is not None:
             return self._client
-        if not self.api_key or self.api_key.startswith("sk-your-"):
-            logger.warning("LLM API key not configured - stub mode")
-            self._client = False
-            return self._client
+        if self._unavailable:
+            return False
+        if not self._is_configured():
+            logger.warning("LLM API key not configured - running in stub mode")
+            self._unavailable = True
+            return False
         try:
             from langchain_openai import ChatOpenAI  # type: ignore
 
+            # 为 DashScope 做一些默认参数适配：
+            # DashScope 的 ChatOpenAI 兼容模式不依赖超时等参数，照常传即可。
             self._client = ChatOpenAI(
                 model=self.model,
                 api_key=self.api_key,
                 base_url=self.base_url,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                timeout=60,
+                max_retries=self._max_retries,
             )
-            logger.info("LLM client initialized", provider=self.provider, model=self.model)
+            logger.info(
+                "LLM client initialized",
+                provider=self.provider,
+                model=self.model,
+                base_url=self.base_url,
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("LLM client init failed", error=str(exc))
-            self._client = False
+            logger.warning("LLM client init failed", error=str(exc), provider=self.provider)
+            self._unavailable = True
+            return False
         return self._client
 
-    # ---------- 公共接口 ----------
+    # ---------------- 辅助 ----------------
 
-    @property
-    def available(self) -> bool:
-        """是否已接入 LLM。"""
-        return bool(self._ensure_client())
+    @staticmethod
+    def _build_messages(
+        prompt: str, system: str | None = None, history: list[dict[str, str]] | None = None
+    ) -> list[Any]:
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage  # type: ignore
 
-    def invoke(self, prompt: str, system: str | None = None) -> str:
-        """调用 LLM。未配置时返回空串，上层需处理。"""
+        messages: list[Any] = []
+        if system:
+            messages.append(SystemMessage(content=system))
+        if history:
+            for msg in history:
+                role = (msg.get("role") or "").lower()
+                content = msg.get("content") or ""
+                if role == "assistant":
+                    messages.append(AIMessage(content=content))
+                elif role in {"human", "user"}:
+                    messages.append(HumanMessage(content=content))
+        messages.append(HumanMessage(content=prompt))
+        return messages
+
+    def _call(self, messages: list[Any], expect_json: bool = False) -> str:
+        """真正发起调用，带简单重试。"""
+        last_exc: Exception | None = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                kwargs: dict[str, Any] = {}
+                if expect_json:
+                    # DashScope / Qwen 官方支持 response_format=json_object
+                    kwargs["model_kwargs"] = {"response_format": {"type": "json_object"}}
+                response = self._client.invoke(messages, **kwargs)
+                content = getattr(response, "content", None)
+                if content is None:
+                    content = str(response)
+                return content.strip() if isinstance(content, str) else str(content).strip()
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                logger.warning(
+                    "LLM call failed",
+                    attempt=attempt + 1,
+                    error=str(exc),
+                )
+                if attempt < self._max_retries:
+                    time.sleep(self._retry_backoff * (2**attempt))
+        if last_exc is not None:
+            logger.error("LLM call finally failed", error=str(last_exc))
+        return ""
+
+    # ---------------- 公共方法 ----------------
+
+    def invoke(
+        self,
+        prompt: str,
+        system: str | None = None,
+        history: list[dict[str, str]] | None = None,
+        expect_json: bool = False,
+    ) -> str:
+        """发起一次文本对话，返回 LLM 的纯文本回答。"""
         client = self._ensure_client()
         if not client:
-            logger.warning("LLM invoke skipped: no client")
+            logger.warning("LLM invoke skipped: client not available", provider=self.provider)
             return ""
+
+        messages = self._build_messages(prompt, system=system, history=history)
+        return self._call(messages, expect_json=expect_json)
+
+    def invoke_json(
+        self,
+        prompt: str,
+        system: str | None = None,
+        history: list[dict[str, str]] | None = None,
+        default: Any = None,
+    ) -> dict[str, Any] | list[Any]:
+        """调用并期望返回 JSON。失败时返回 default（默认 {}）。"""
+        text = self.invoke(prompt, system=system, history=history, expect_json=True)
+        if not text:
+            return default if default is not None else {}
+
+        # Qwen 有时会用 ```json ... ``` 包裹
+        cleaned = text.strip()
+        if cleaned.startswith("```") and cleaned.endswith("```"):
+            cleaned = cleaned.strip("`")
+            # 去掉开头的 json/json5/js 等标签
+            for tag in ("json", "json5", "js", "javascript"):
+                if cleaned.lower().startswith(tag):
+                    cleaned = cleaned[len(tag):].strip()
+                    break
+
         try:
-            messages = []
-            if system:
-                from langchain_core.messages import SystemMessage, HumanMessage  # type: ignore
+            data = json.loads(cleaned)
+        except json.JSONDecodeError as exc:
+            logger.error("LLM JSON parse failed", error=str(exc), snippet=cleaned[:200])
+            return default if default is not None else {}
+        return data
 
-                messages.append(SystemMessage(content=system))
-                messages.append(HumanMessage(content=prompt))
-            else:
-                from langchain_core.messages import HumanMessage  # type: ignore
+    # ---------------- 便捷方法（供单元测试 mock） ----------------
 
-                messages.append(HumanMessage(content=prompt))
-            response = client.invoke(messages)
-            return response.content if hasattr(response, "content") else str(response)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("LLM invoke failed", error=str(exc))
-            return ""
+    def reset(self) -> None:
+        """重置状态。主要给测试用。"""
+        self._client = None
+        self._unavailable = False
 
 
 # 全局单例
 llm_client = LLMClient()
+
+__all__ = ["LLMClient", "llm_client"]

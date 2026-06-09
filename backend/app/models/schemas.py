@@ -13,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class WorkExperience(BaseModel):
     """工作经历条目。"""
 
-    company: str
-    role: str
+    company: str | None = None
+    role: str | None = None
     period: str | None = None
     start_date: str | None = None
     end_date: str | None = None
@@ -24,7 +24,7 @@ class WorkExperience(BaseModel):
 class ProjectItem(BaseModel):
     """项目经历条目。"""
 
-    name: str
+    name: str | None = None
     description: str | None = None
     role: str | None = None
     period: str | None = None
