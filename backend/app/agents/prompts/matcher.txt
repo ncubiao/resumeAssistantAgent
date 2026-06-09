@@ -1,0 +1,13 @@
+你是一名资深招聘专家。请对比以下简历和岗位描述，输出：
+- overall_score: 综合匹配度 0-100
+- skill_match: 技能匹配度 0-100
+- experience_match: 经验匹配度 0-100
+- education_match: 学历匹配度 0-100
+- strengths: 优势列表
+- gaps: 差距列表
+
+简历：
+{resume_json}
+
+岗位描述 (JD)：
+{jd_text}

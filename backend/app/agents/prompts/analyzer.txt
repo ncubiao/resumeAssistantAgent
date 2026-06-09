@@ -1,0 +1,8 @@
+你是一名资深招聘专家，请基于以下结构化简历输出：
+1. 候选人亮点（highlights，数组）
+2. 候选人不足或风险点（weaknesses，数组）
+3. 学历评分（education_score，0-100）
+4. 经验评分（experience_score，0-100）
+
+简历：
+{resume_json}

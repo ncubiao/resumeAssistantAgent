@@ -1,0 +1,27 @@
+张三
+男 · 1992.08 · 北京 · 13900001111 · zhangsan@example.com
+
+【个人简介】
+5 年 Python 后端开发经验，擅长 Web 系统架构与性能优化，有完整互联网产品研发经验。
+
+【教育背景】
+2011.09 - 2015.06  北京某大学  计算机科学与技术  本科
+
+【工作经历】
+2022.03 - 至今  XX 科技有限公司  资深后端工程师
+- 负责公司核心交易系统的 API 设计与开发，日活 50w+
+- 主导从 Flask 迁移到 FastAPI，接口响应时间平均下降 40%
+- 使用 PostgreSQL + Redis 做数据存储与缓存优化
+- 使用 Docker + Kubernetes 部署，CI/CD 基于 GitHub Actions
+
+2019.07 - 2022.02  YY 互联网公司  后端工程师
+- 参与内容社区平台开发，Python + Django + MySQL
+- 负责用户增长系统，独立完成 A/B 测试框架搭建
+
+【技能】
+Python, FastAPI, Django, Flask, PostgreSQL, MySQL, Redis, Docker, Kubernetes,
+Git, GitHub Actions, REST API, 消息队列 (RabbitMQ), Celery
+
+【项目经历】
+项目 A：交易系统重构 —— 技术栈 FastAPI + PostgreSQL + Redis，负责核心模块设计
+项目 B：A/B 测试平台 —— 独立搭建，支持 100+ 实验同时运行

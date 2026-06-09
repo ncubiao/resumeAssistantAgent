@@ -1,0 +1,20 @@
+李四
+男 · 1995.05 · 上海 · 13800002222 · lisi@example.com
+
+【个人简介】
+3 年后端开发经验，熟悉 Python / Node.js，有分布式系统实战经验。
+
+【教育背景】
+2013.09 - 2017.06  上海某大学  软件工程  本科
+
+【工作经历】
+2021.06 - 至今  ZZ 公司  后端开发工程师
+- 参与电商平台商品系统设计与开发，使用 Python + FastAPI
+- 负责消息队列模块（Kafka），处理日均 200w 消息
+- 使用 MongoDB 存储商品详情
+
+【技能】
+Python, FastAPI, Node.js, MongoDB, Redis, Kafka, Docker, Git, Linux
+
+【项目经历】
+项目 A：商品搜索优化 —— 使用 Elasticsearch 提升搜索响应速度 3 倍
