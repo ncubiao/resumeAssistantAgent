@@ -25,6 +25,70 @@ from app.core.logging import get_logger
 
 logger = get_logger("llm_client")
 
+
+# ---------------- 辅助函数：从任意文本中提取 JSON ----------------
+import re as _re
+
+
+def _extract_json(text: str) -> Any | None:
+    """从 LLM 文本输出中提取并解析 JSON 对象 / 数组。
+
+    支持的典型情况：
+    1. 纯 JSON：`{"a":1}`
+    2. 代码块包裹：```json\n{...}\n```
+    3. 文字中夹带 JSON："好的，结果是：\n{...}\n"
+    4. JSON 数组：[...]
+    """
+    if not text:
+        return None
+    cleaned = text.strip()
+
+    # 策略 1：直接解析
+    try:
+        return json.loads(cleaned)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 策略 2：代码块形式 ```json ... ``` / ``` ... ```
+    block_match = _re.search(
+        r"```(?:json|JSON|js|javascript)?\s*\n?(.*?)```",
+        cleaned,
+        flags=_re.DOTALL,
+    )
+    if block_match:
+        try:
+            return json.loads(block_match.group(1).strip())
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 策略 3：找第一个 { 到最后一个 }，或第一个 [ 到最后一个 ]
+    for open_c, close_c in (("{", "}"), ("[", "]")):
+        start = cleaned.find(open_c)
+        end = cleaned.rfind(close_c)
+        if 0 <= start < end:
+            candidate = cleaned[start:end + 1]
+            try:
+                return json.loads(candidate)
+            except Exception:  # noqa: BLE001
+                # 3b：如果 { 和 } 可能有多个，尝试从每个配对
+                # 找到第一个 { 和最后一个 } 之间的内容可能包含非 JSON 文本
+                # 逐个尝试不同的子字符串
+                pass
+
+    # 策略 4：逐行扫描，拼接所有看起来像 JSON 的行 / 每行分别尝试
+    lines = cleaned.split("\n")
+    # 优先尝试每一行、以及多行块
+    candidate_lines = []
+    for line in lines:
+        candidate_lines.append(line)
+        joined = "\n".join(candidate_lines[-30:])
+        try:
+            return json.loads(joined.strip())
+        except Exception:  # noqa: BLE001
+            continue
+
+    return None
+
 # 各服务商默认的 base_url（当用户未显式设置时使用）
 _DEFAULT_BASE_URLS: dict[str, str] = {
     "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -310,27 +374,21 @@ class LLMClient:
         history: list[dict[str, str]] | None = None,
         default: Any = None,
     ) -> dict[str, Any] | list[Any]:
-        """调用并期望返回 JSON。失败时返回 default（默认 {}）。"""
+        """调用并期望返回 JSON。失败时返回 default（默认 {}）。
+
+        相比普通 invoke：额外支持多种 JSON 提取策略（markdown 代码块、
+        文本中提取第一个 {...} / [...] 对象等），以应对不同模型的输出习惯。
+        """
         text = self.invoke(prompt, system=system, history=history, expect_json=True)
         if not text:
             return default if default is not None else {}
 
-        # Qwen 有时会用 ```json ... ``` 包裹
-        cleaned = text.strip()
-        if cleaned.startswith("```") and cleaned.endswith("```"):
-            cleaned = cleaned.strip("`")
-            # 去掉开头的 json/json5/js 等标签
-            for tag in ("json", "json5", "js", "javascript"):
-                if cleaned.lower().startswith(tag):
-                    cleaned = cleaned[len(tag):].strip()
-                    break
+        parsed = _extract_json(text)
+        if parsed is not None:
+            return parsed
 
-        try:
-            data = json.loads(cleaned)
-        except json.JSONDecodeError as exc:
-            logger.error("LLM JSON parse failed", error=str(exc), snippet=cleaned[:200])
-            return default if default is not None else {}
-        return data
+        logger.warning("LLM JSON parse failed after all strategies", snippet=text[:300])
+        return default if default is not None else {}
 
     # ---------------- 便捷方法（供单元测试 mock） ----------------
 

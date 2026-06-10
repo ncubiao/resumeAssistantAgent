@@ -1,6 +1,8 @@
 """Pydantic Settings 配置管理。
 
-从 .env 文件或环境变量读取配置。
+从 .env 文件或环境变量读取配置。支持以下路径（按优先级，后读到的覆盖前面：
+1. 项目根目录（backend/ 的上级目录，与 .env.example 同级）
+2. backend/ 目录
 """
 from __future__ import annotations
 
@@ -9,8 +11,10 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 项目根目录（backend/ 下的 app/core 往上两层）
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# 项目根目录：backend/app/core/config.py 的上三层（与 .env.example 同级）
+REPO_ROOT = Path(__file__).resolve().parents[3]
+# backend/ 目录
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -36,11 +40,11 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 2048
 
     # 向量检索
-    vector_index_path: str = str(PROJECT_ROOT / "data" / "vector_index" / "faiss_index.bin")
+    vector_index_path: str = str(BACKEND_ROOT / "data" / "vector_index" / "faiss_index.bin")
     vector_dim: int = 1536
 
     # 文件上传
-    upload_dir: str = str(PROJECT_ROOT / "data" / "uploads")
+    upload_dir: str = str(BACKEND_ROOT / "data" / "uploads")
     max_file_size_mb: int = 20
 
     # 日志
@@ -48,7 +52,7 @@ class Settings(BaseSettings):
     log_format: str = "json"
 
     model_config = SettingsConfigDict(
-        env_file=str(PROJECT_ROOT / ".env"),
+        env_file=[str(REPO_ROOT / ".env"), str(BACKEND_ROOT / ".env")],
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
