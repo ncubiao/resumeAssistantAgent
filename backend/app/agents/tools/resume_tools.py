@@ -10,21 +10,21 @@ from app.utils.llm_client import llm_client
 logger = get_logger("agent.tools.resume")
 
 
-def parse_resume_text(raw_text: str) -> str:
+def parse_resume_text(resume_text: str) -> str:
     """从简历的纯文本中提取结构化信息并返回 JSON 字符串。
 
     Args:
-        raw_text: 简历的全文内容（从 PDF/Word 中提取的文本）。
+        resume_text: 简历的全文内容（从 PDF/Word/图片中提取的文本）。
 
     Returns:
         一段 JSON 字符串，字段包含：name、email、phone、education_level、
         years_of_experience、skills（数组）、work_history（数组）、projects（数组）、
-        summary 等。若解析失败，会附带 heuristic_fallback 说明。
+        summary 等。
     """
-    if not raw_text or not raw_text.strip():
-        return json.dumps({"error": "raw_text is empty"}, ensure_ascii=False, indent=2)
+    if not resume_text or not resume_text.strip():
+        return json.dumps({"error": "resume_text is empty"}, ensure_ascii=False, indent=2)
 
-    result = run_parser(raw_text) or {}
+    result = run_parser(resume_text) or {}
     parsed = result.get("parsed_resume") or {}
     confidence = result.get("parse_confidence") or 0.0
     provider = result.get("provider") or "unknown"

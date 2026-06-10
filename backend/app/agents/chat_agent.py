@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.agents.tools import get_all_tools
+from app.agents.tools import get_all_tools, invoke_tool
 from app.core.logging import get_logger
 from app.utils.llm_client import llm_client
 
@@ -164,15 +164,24 @@ def _try_native_tool_calls(
         for tc in tool_calls:
             name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
             args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
-            tool = tool_map.get(str(name))
-            if tool is None:
-                logger.warning("unknown tool in tool_calls", name=name)
+            tool_name = str(name or "")
+            if tool_name not in tool_map:
+                logger.warning("unknown tool in tool_calls", name=tool_name)
                 continue
-            try:
-                result = tool.invoke(args)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("tool invoke failed", name=name, error=str(exc))
-                result = f"Error: {exc}"
+            # args 可能是 dict / 字符串 / None，交给 invoke_tool 归一化处理
+            if isinstance(args, dict):
+                tool_kwargs = dict(args)
+            elif isinstance(args, str) and args.strip():
+                try:
+                    tool_kwargs = json.loads(args)
+                    if not isinstance(tool_kwargs, dict):
+                        tool_kwargs = {"resume_text": str(args)}
+                except json.JSONDecodeError:
+                    tool_kwargs = {"resume_text": args}
+            else:
+                tool_kwargs = {}
+
+            result = invoke_tool(tool_name, **tool_kwargs)
 
             result_str = str(result)
             truncated = _truncate(result_str, 400)
@@ -233,17 +242,15 @@ def _run_prompt_based_tool_loop(
             return _strip_code_blocks(raw_reply) if raw_reply else "抱歉，我无法处理这个请求。"
 
         tool_name, tool_args = tool_call
-        tool = tool_map.get(tool_name)
-        if tool is None:
+        if tool_name not in tool_map:
             logger.warning("prompt-based: unknown tool", name=tool_name)
             return _strip_code_blocks(raw_reply)
 
-        # 执行工具
-        try:
-            result = tool.invoke(tool_args)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("prompt-based tool invoke failed", name=tool_name, error=str(exc))
-            result = f"Error: {exc}"
+        # 执行工具（用 invoke_tool，能自动归一化字段名）
+        if isinstance(tool_args, dict):
+            result = invoke_tool(tool_name, **tool_args)
+        else:
+            result = invoke_tool(tool_name, resume_text=str(tool_args))
 
         result_str = str(result)
         tool_turns.append(ChatTurn(
