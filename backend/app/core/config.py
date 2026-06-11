@@ -39,8 +39,22 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.2
     llm_max_tokens: int = 2048
 
+    # Embedding（向量化）—— 与 LLM 解耦，可独立切换 provider/model。
+    # 留空的项会按以下规则回退，老 .env 无需改动即可运行：
+    #   embedding_provider 空 -> 跟随 llm_provider
+    #   embedding_model    空 -> 按 provider 推断（见 services/embedding.py）
+    #   embedding_base_url 空 -> 跟随该 provider 的默认 /v1 地址
+    #   embedding_api_key  空 -> 复用 llm_api_key
+    # 注意：DeepSeek 无 embedding 端点，会自动降级为关键词检索。
+    embedding_provider: str = ""
+    embedding_model: str = ""
+    embedding_dim: int = 1024
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
+
     # 向量检索
     vector_index_path: str = str(BACKEND_ROOT / "data" / "vector_index" / "faiss_index.bin")
+    # deprecated：维度的单一事实来源已改为 embedding_dim，此项仅为向后兼容保留。
     vector_dim: int = 1536
 
     # 文件上传

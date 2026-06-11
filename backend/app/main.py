@@ -1,22 +1,39 @@
 """FastAPI 应用入口 - resumeAssistantAgent 后端。"""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import chat, match, optimize, resume
 from app.core.config import settings
-from app.core.logging import setup_logging
+from app.core.database import init_db
+from app.core.logging import get_logger, setup_logging
 from app.utils.llm_client import llm_client
 
 # 初始化日志
 setup_logging(settings.log_level)
+logger = get_logger("main")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期：启动时建表（create_all 幂等，已存在则跳过）。
+
+    阶段 2 起数据库正式启用。生产化时建议切换为 Alembic 迁移管理。
+    """
+    init_db()
+    logger.info("application startup complete", env=settings.app_env)
+    yield
+
 
 app = FastAPI(
     title=settings.app_name,
     description="简历分析 AI Agent 后端 API（支持 DashScope / OpenAI 兼容模式）",
     version="0.2.0",
     debug=settings.debug,
+    lifespan=lifespan,
 )
 
 app.add_middleware(

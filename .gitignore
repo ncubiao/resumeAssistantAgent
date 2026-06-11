@@ -228,5 +228,9 @@ langchain_data/
 /data/uploads/
 /data/vector_index/
 *.bin
+*.bin.meta.json
+# 后端运行时产物（SQLite 库、上传文件、向量索引）
+backend/data/
+*.db
 !data/samples/*.pdf
 !data/samples/*.docx
