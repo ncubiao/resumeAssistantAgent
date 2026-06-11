@@ -1,6 +1,7 @@
 """后端 API 客户端封装。"""
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import requests
@@ -12,12 +13,17 @@ class APIClient:
     def __init__(self, base_url: str = "http://localhost:8000") -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = 30
+        # 可选 API Key：后端开启鉴权时通过环境变量提供，默认无（与后端默认关闭对应）
+        self.api_key = os.environ.get("BACKEND_API_KEY", "")
+        self._session = requests.Session()
+        if self.api_key:
+            self._session.headers.update({"X-API-Key": self.api_key})
 
     # ---------- 通用 ----------
 
     def health_check(self) -> tuple[bool, str]:
         try:
-            resp = requests.get(f"{self.base_url}/health", timeout=self.timeout)
+            resp = self._session.get(f"{self.base_url}/health", timeout=self.timeout)
             resp.raise_for_status()
             return True, resp.json().get("service", "ok")
         except Exception as exc:  # noqa: BLE001
@@ -28,7 +34,7 @@ class APIClient:
     def upload_resume(self, file_bytes: bytes, filename: str) -> dict[str, Any] | None:
         try:
             files = {"file": (filename, file_bytes)}
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self.base_url}/api/v1/resumes/upload",
                 files=files,
                 timeout=self.timeout,
@@ -40,7 +46,7 @@ class APIClient:
 
     def list_resumes(self) -> list[dict[str, Any]]:
         try:
-            resp = requests.get(f"{self.base_url}/api/v1/resumes", timeout=self.timeout)
+            resp = self._session.get(f"{self.base_url}/api/v1/resumes", timeout=self.timeout)
             resp.raise_for_status()
             return resp.json() or []
         except Exception:  # noqa: BLE001
@@ -48,7 +54,7 @@ class APIClient:
 
     def get_resume(self, resume_id: str) -> dict[str, Any] | None:
         try:
-            resp = requests.get(
+            resp = self._session.get(
                 f"{self.base_url}/api/v1/resumes/{resume_id}", timeout=self.timeout
             )
             resp.raise_for_status()
@@ -59,7 +65,7 @@ class APIClient:
     def parse_text(self, text: str) -> dict[str, Any] | None:
         """直接提交简历文本，落库并返回（含 id）。"""
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self.base_url}/api/v1/resumes/parse-text",
                 json={"text": text},
                 timeout=self.timeout,
@@ -71,7 +77,7 @@ class APIClient:
 
     def search_resumes(self, query: str, k: int = 5) -> list[dict[str, Any]]:
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self.base_url}/api/v1/resumes/search",
                 json={"query": query, "k": k},
                 timeout=self.timeout,
@@ -85,7 +91,7 @@ class APIClient:
 
     def match_single(self, resume_id: str, jd: str) -> dict[str, Any] | None:
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self.base_url}/api/v1/matches/single",
                 json={"resume_id": resume_id, "jd": jd},
                 timeout=180,
@@ -97,7 +103,7 @@ class APIClient:
 
     def match_batch(self, resume_ids: list[str], jd: str) -> dict[str, Any] | None:
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self.base_url}/api/v1/matches/batch",
                 json={"resume_ids": resume_ids, "jd": jd},
                 timeout=300,  # 多份简历串行调 LLM
@@ -111,7 +117,7 @@ class APIClient:
 
     def optimize_suggestions(self, resume_id: str, target_jd: str | None = None) -> dict[str, Any] | None:
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self.base_url}/api/v1/optimize/suggestions",
                 json={"resume_id": resume_id, "target_jd": target_jd},
                 timeout=180,
@@ -123,7 +129,7 @@ class APIClient:
 
     def optimize_rewrite(self, paragraph: str, target_role: str | None = None) -> dict[str, Any] | None:
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self.base_url}/api/v1/optimize/rewrite",
                 json={"paragraph": paragraph, "target_role": target_role},
                 timeout=120,
@@ -155,7 +161,7 @@ class APIClient:
                 body["mode"] = mode
             if thread_id:
                 body["thread_id"] = thread_id
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self.base_url}/api/v1/agent/analyze",
                 json=body,
                 timeout=300,
@@ -188,7 +194,7 @@ class APIClient:
             if jd_file is not None and jd_filename:
                 files["jd_file"] = (jd_filename, jd_file)
 
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self.base_url}/api/v1/chat",
                 data=data,
                 files=files if files else None,

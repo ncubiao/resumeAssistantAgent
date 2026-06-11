@@ -3,13 +3,16 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api import agent, chat, match, optimize, resume
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.logging import get_logger, setup_logging
+from app.core.middleware import RateLimitMiddleware, RequestContextMiddleware
+from app.core.security import require_api_key
 from app.utils.llm_client import llm_client
 
 # 初始化日志
@@ -24,31 +27,69 @@ async def lifespan(app: FastAPI):
     阶段 2 起数据库正式启用。生产化时建议切换为 Alembic 迁移管理。
     """
     init_db()
-    logger.info("application startup complete", env=settings.app_env)
+    logger.info(
+        "application startup complete",
+        env=settings.app_env,
+        auth_enabled=settings.auth_enabled,
+        rate_limit=settings.rate_limit_enabled,
+    )
     yield
 
 
 app = FastAPI(
     title=settings.app_name,
     description="简历分析 AI Agent 后端 API（支持 DashScope / OpenAI 兼容模式）",
-    version="0.2.0",
+    version="0.3.0",
     debug=settings.debug,
     lifespan=lifespan,
 )
 
+# ---------- 中间件（顺序：先注册的更靠外层）----------
+# RequestContext 最外层：保证限流响应也带 request_id 与访问日志。
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(RequestContextMiddleware)
+
+# CORS：从配置读取允许来源，不再用通配 "*"。
+_cors_origins = settings.cors_origins_list or ["*"]
+_allow_credentials = "*" not in _cors_origins  # 通配时浏览器规范禁止携带凭证
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(resume.router, prefix="/api/v1/resumes", tags=["resumes"])
-app.include_router(match.router, prefix="/api/v1/matches", tags=["matches"])
-app.include_router(optimize.router, prefix="/api/v1/optimize", tags=["optimize"])
-app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
-app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent"])
+
+# ---------- 统一异常信封 ----------
+
+@app.exception_handler(HTTPException)
+async def _http_exc_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", "")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": exc.status_code, "message": exc.detail, "request_id": request_id}},
+        headers=getattr(exc, "headers", None),
+    )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exc_handler(request: Request, exc: Exception) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", "")
+    logger.error("unhandled exception", path=request.url.path, error=str(exc), request_id=request_id)
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": 500, "message": "服务器内部错误", "request_id": request_id}},
+    )
+
+
+# ---------- 路由（业务路由统一挂 API Key 鉴权依赖）----------
+_secured = [Depends(require_api_key)]
+app.include_router(resume.router, prefix="/api/v1/resumes", tags=["resumes"], dependencies=_secured)
+app.include_router(match.router, prefix="/api/v1/matches", tags=["matches"], dependencies=_secured)
+app.include_router(optimize.router, prefix="/api/v1/optimize", tags=["optimize"], dependencies=_secured)
+app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"], dependencies=_secured)
+app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent"], dependencies=_secured)
 
 
 @app.get("/health", tags=["health"])

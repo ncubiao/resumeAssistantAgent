@@ -65,6 +65,29 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: str = "json"
 
+    # ---------- 生产加固（阶段 5）----------
+    # 鉴权：默认关闭，本地开发 / demo 无需带 key。生产置 true 并配置 api_keys。
+    auth_enabled: bool = False
+    api_keys: str = ""  # 逗号分隔的合法 X-API-Key 列表
+
+    # CORS：逗号分隔的允许来源。默认仅放行本地前端，不再用通配 "*"。
+    # 显式设为 "*" 时会自动关闭 allow_credentials（浏览器规范要求）。
+    cors_allow_origins: str = "http://localhost:8501,http://127.0.0.1:8501"
+
+    # 限流：默认关闭（避免影响 demo / 测试）。生产置 true。内存滑动窗口，按客户端 IP。
+    rate_limit_enabled: bool = False
+    rate_limit_per_minute: int = 120
+
+    @property
+    def api_key_set(self) -> set[str]:
+        """解析后的合法 API Key 集合。"""
+        return {k.strip() for k in self.api_keys.split(",") if k.strip()}
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
+
+
     model_config = SettingsConfigDict(
         env_file=[str(REPO_ROOT / ".env"), str(BACKEND_ROOT / ".env")],
         env_file_encoding="utf-8",
