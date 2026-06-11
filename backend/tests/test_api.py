@@ -28,7 +28,7 @@ def test_root(client):
 
 def test_upload_returns_501_or_201_for_plain_text(client):
     # 没有 pdfplumber/PyPDF2 环境时，txt 后缀可走通
-    content = "张三\nPython Engineer".encode("utf-8")
+    content = "张三\nPython Engineer".encode()
     resp = client.post(
         "/api/v1/resumes/upload",
         files={"file": ("resume.txt", content, "text/plain")},

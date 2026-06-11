@@ -18,18 +18,40 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
 
       - name: Install dependencies
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov ruff
+          pip install -r requirements-dev.txt
 
       - name: Ruff lint
         working-directory: backend
         run: ruff check app/ tests/
 
-      - name: Run tests
+      - name: Run tests with coverage gate
         working-directory: backend
-        run: pytest -v --cov=app --cov-report=term-missing --cov-fail-under=0
+        # CI 无 LLM key，全部走 heuristic / fallback，结果确定性。门槛设 55%（实测 ~61%）。
+        run: pytest --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=55
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: backend/coverage.xml
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile-check frontend
+        working-directory: frontend
+        run: python -m compileall app.py components pages

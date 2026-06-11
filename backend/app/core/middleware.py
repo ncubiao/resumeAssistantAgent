@@ -14,15 +14,16 @@ from uuid import uuid4
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.metrics import metrics
 
 logger = get_logger("http")
 
-# 限流豁免路径（健康检查 / 文档不计入）
-_RATE_LIMIT_EXEMPT = {"/health", "/", "/docs", "/openapi.json", "/redoc"}
+# 限流豁免路径（健康检查 / 文档 / 指标不计入）
+_RATE_LIMIT_EXEMPT = {"/health", "/health/deep", "/metrics", "/", "/docs", "/openapi.json", "/redoc"}
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -42,7 +43,8 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
         finally:
-            duration_ms = int((time.perf_counter() - t0) * 1000)
+            elapsed = time.perf_counter() - t0
+            duration_ms = int(elapsed * 1000)
             try:
                 import structlog  # type: ignore
 
@@ -50,6 +52,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             except Exception:  # noqa: BLE001
                 pass
 
+        metrics.observe_request(request.method, request.url.path, response.status_code, elapsed)
         response.headers["X-Request-ID"] = request_id
         logger.info(
             "request",

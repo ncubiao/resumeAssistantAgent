@@ -17,8 +17,9 @@ from __future__ import annotations
 import operator
 import time
 import traceback
-from datetime import datetime, timezone
-from typing import Annotated, Any, Callable, TypedDict
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Annotated, Any, TypedDict
 from uuid import uuid4
 
 from app.agents.nodes import analyzer_agent, matcher_agent, optimizer_agent, parser_agent
@@ -96,7 +97,7 @@ def _traced(name: str, fn: Callable[[ResumeAnalysisState], dict]):
     """包裹节点函数，自动记录 trace 条目。"""
 
     def wrapper(state: ResumeAnalysisState) -> dict:
-        started_at = datetime.now(timezone.utc).isoformat()
+        started_at = datetime.now(UTC).isoformat()
         t0 = time.perf_counter()
         entry: dict[str, Any] = {"node": name, "started_at": started_at, "error": None}
         try:

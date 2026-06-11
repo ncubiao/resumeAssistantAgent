@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
-
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------- 工作经历 / 项目经历（嵌套结构） ----------
 

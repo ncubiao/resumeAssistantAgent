@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from app.agents.tools.match_tools import match_resume_to_jd
 from app.agents.tools.optimize_tools import generate_optimize_suggestions
@@ -146,7 +146,7 @@ def get_all_tools():
 
     class GenerateOptimizeSuggestionsSchema(BaseModel):
         resume_text: str = Field(..., description="候选人的简历全文内容")
-        jd_text: Optional[str] = Field(default=None, description="可选：目标岗位的职位描述，有则建议更有针对性")
+        jd_text: str | None = Field(default=None, description="可选：目标岗位的职位描述，有则建议更有针对性")
 
     # ---------- 构造 Tool 实例 ----------
     return [

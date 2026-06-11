@@ -124,7 +124,7 @@ def get_logger(name: str = "resume_agent"):
         def critical(self, msg: str, **kwargs: object) -> None:
             self._lg.critical(self._fmt(msg, **kwargs))
 
-        def bind(self, **_kwargs: object) -> "_FallbackLogger":
+        def bind(self, **_kwargs: object) -> _FallbackLogger:
             return self
 
     return _FallbackLogger(logger)

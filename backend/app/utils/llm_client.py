@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import re as _re
 import time
 from typing import Any
 
@@ -26,8 +27,17 @@ from app.core.logging import get_logger
 logger = get_logger("llm_client")
 
 
+def _record_llm(error: bool) -> None:
+    """记录一次 LLM 调用到指标（失败时静默忽略，绝不影响主流程）。"""
+    try:
+        from app.core.metrics import metrics
+
+        metrics.inc_llm(error=error)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # ---------------- 辅助函数：从任意文本中提取 JSON ----------------
-import re as _re
 
 
 def _extract_json(text: str) -> Any | None:
@@ -247,6 +257,7 @@ class LLMClient:
                 content = getattr(response, "content", None)
                 if content is None:
                     content = str(response)
+                _record_llm(error=False)
                 return content.strip() if isinstance(content, str) else str(content).strip()
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
@@ -258,6 +269,7 @@ class LLMClient:
                 if attempt < self._max_retries:
                     time.sleep(self._retry_backoff * (2**attempt))
         if last_exc is not None:
+            _record_llm(error=True)
             logger.error("LLM call finally failed", error=str(last_exc))
         return ""
 

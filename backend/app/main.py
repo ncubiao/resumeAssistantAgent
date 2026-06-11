@@ -5,12 +5,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.api import agent, chat, match, optimize, resume
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.logging import get_logger, setup_logging
+from app.core.metrics import metrics
 from app.core.middleware import RateLimitMiddleware, RequestContextMiddleware
 from app.core.security import require_api_key
 from app.utils.llm_client import llm_client
@@ -94,12 +95,60 @@ app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent"], depende
 
 @app.get("/health", tags=["health"])
 async def health_check() -> dict:
-    """服务健康检查。"""
+    """服务健康检查（浅层，永远快速返回）。"""
     return {
         "status": "ok",
         "service": settings.app_name,
         "env": settings.app_env,
     }
+
+
+@app.get("/health/deep", tags=["health"])
+async def health_deep() -> JSONResponse:
+    """深度健康检查：探测 DB / 向量库 / LLM 配置，任一关键依赖故障返回 503。"""
+    checks: dict[str, dict] = {}
+
+    # DB：执行一次 SELECT 1
+    try:
+        from sqlalchemy import text
+
+        from app.core.database import session_scope
+
+        with session_scope() as s:
+            s.execute(text("SELECT 1"))
+        checks["database"] = {"status": "ok"}
+    except Exception as exc:  # noqa: BLE001
+        checks["database"] = {"status": "error", "detail": str(exc)[:200]}
+
+    # 向量库：报告可用性与规模（不可用不算致命，会降级到关键词检索）
+    try:
+        from app.services.embedding import embedding_client
+        from app.services.vector_store import vector_store
+
+        checks["vector_store"] = {
+            "status": "ok",
+            "embedding_available": embedding_client.available,
+            "indexed": vector_store.size(),
+        }
+    except Exception as exc:  # noqa: BLE001
+        checks["vector_store"] = {"status": "error", "detail": str(exc)[:200]}
+
+    # LLM：仅报告配置状态（不实际调用），未配置不算致命（有 heuristic 兜底）
+    checks["llm"] = {"status": "ok", "available": llm_client.available, "provider": llm_client.provider}
+
+    # 只有 DB 故障才判定整体不健康
+    healthy = checks["database"]["status"] == "ok"
+    status_code = 200 if healthy else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": "ok" if healthy else "degraded", "checks": checks},
+    )
+
+
+@app.get("/metrics", tags=["metrics"], response_class=PlainTextResponse)
+async def prometheus_metrics() -> PlainTextResponse:
+    """Prometheus 文本格式指标暴露。"""
+    return PlainTextResponse(metrics.render_prometheus(), media_type="text/plain; version=0.0.4")
 
 
 @app.get("/api/v1/llm/health", tags=["llm"])
