@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chat, match, optimize, resume
+from app.api import agent, chat, match, optimize, resume
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.logging import get_logger, setup_logging
@@ -48,6 +48,7 @@ app.include_router(resume.router, prefix="/api/v1/resumes", tags=["resumes"])
 app.include_router(match.router, prefix="/api/v1/matches", tags=["matches"])
 app.include_router(optimize.router, prefix="/api/v1/optimize", tags=["optimize"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
+app.include_router(agent.router, prefix="/api/v1/agent", tags=["agent"])
 
 
 @app.get("/health", tags=["health"])

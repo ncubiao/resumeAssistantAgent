@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -131,3 +131,53 @@ class RewriteResultOut(BaseModel):
     original: str
     rewritten: str
     highlights: list[str] = Field(default_factory=list)
+
+
+# ---------- Agent 编排（阶段 3） ----------
+
+class AgentAnalyzeRequest(BaseModel):
+    """resume_id 与 raw_text 二选一，至少给一个。"""
+
+    resume_id: str | None = None
+    raw_text: str | None = None
+    jd: str | None = None
+    mode: Literal["match", "optimize", "both"] | None = None
+    thread_id: str | None = None
+
+
+class TraceEntry(BaseModel):
+    node: str
+    started_at: str
+    duration_ms: int = 0
+    output_keys: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+class AnalysisDetail(BaseModel):
+    skills: list[str] = Field(default_factory=list)
+    highlights: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    education_score: int = 0
+    experience_score: int = 0
+
+
+class MatchDetail(BaseModel):
+    score: float = 0.0
+    strengths: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    reasoning: str = ""
+
+
+class OptimizeDetail(BaseModel):
+    suggestions: list[OptimizeSuggestion] = Field(default_factory=list)
+
+
+class AgentAnalyzeResponse(BaseModel):
+    parsed_resume: dict | None = None
+    parse_confidence: float = 0.0
+    analysis: AnalysisDetail = Field(default_factory=AnalysisDetail)
+    match: MatchDetail | None = None
+    optimize: OptimizeDetail | None = None
+    trace: list[TraceEntry] = Field(default_factory=list)
+    thread_id: str
+    mode: str
