@@ -238,8 +238,11 @@ class LLMClient:
             try:
                 kwargs: dict[str, Any] = {}
                 if expect_json:
-                    # DashScope / Qwen 官方支持 response_format=json_object
-                    kwargs["model_kwargs"] = {"response_format": {"type": "json_object"}}
+                    # DashScope / Qwen / OpenAI 官方支持 response_format=json_object。
+                    # 注意：response_format 要作为 invoke 的运行时 kwarg 直接透传给底层
+                    # Completions.create()；不能用 model_kwargs 包裹（那是 ChatOpenAI 的
+                    # 构造参数，透传到 create() 会报 unexpected keyword argument）。
+                    kwargs["response_format"] = {"type": "json_object"}
                 response = self._client.invoke(messages, **kwargs)
                 content = getattr(response, "content", None)
                 if content is None:
