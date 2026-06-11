@@ -27,7 +27,9 @@ if uploaded is not None:
     if isinstance(result, dict) and "error" in result:
         st.error(f"❌ 解析失败: {result['error']}")
     elif result:
-        st.success("✅ 解析完成")
+        st.success("✅ 解析完成并已入库")
+        st.code(str(result.get("id") or ""), language=None)
+        st.caption("👆 这是简历 ID，可在「岗位匹配 / 简历优化 / Agent 编排」页直接选用该简历。")
 
         col1, col2 = st.columns([1, 2])
         with col1:
@@ -45,7 +47,7 @@ if uploaded is not None:
             if skills:
                 st.write("、".join(skills))
             else:
-                st.caption("（当前为骨架版本，技能提取在阶段 3 接入）")
+                st.caption("（未识别到技能关键词）")
 
         with col2:
             st.subheader("📝 原始文本（截断预览）")
