@@ -9,7 +9,11 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-v"
+# 默认不跑 eval（需真实 LLM）：要跑用 `pytest -m eval -v`
+addopts = "-v -m 'not eval'"
+markers = [
+    "eval: 端到端质量评测，需要真实 LLM Key（pytest -m eval 显式触发）",
+]
 
 [tool.mypy]
 python_version = "3.11"

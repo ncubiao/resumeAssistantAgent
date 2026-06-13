@@ -1,0 +1,47 @@
+name: Agent Quality Eval
+
+# 手动触发的 Agent 质量评测：跑黄金集对比人工标注，验证 LLM 输出质量。
+# 不在 push/PR 自动跑（需 LLM API Key 且耗时分钟级）。
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "LLM provider (dashscope/openai/deepseek)"
+        required: false
+        default: "dashscope"
+  schedule:
+    # 每周一上午跑一次回归（如配置了 secrets）
+    - cron: "0 1 * * 1"
+
+jobs:
+  eval:
+    name: Run Agent Eval
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.repository_owner != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run Eval
+        working-directory: backend
+        env:
+          LLM_PROVIDER: ${{ github.event.inputs.provider || 'dashscope' }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+        run: |
+          if [ -z "$LLM_API_KEY" ]; then
+            echo "LLM_API_KEY secret not set; skipping eval"
+            exit 0
+          fi
+          pytest -m eval -v -s

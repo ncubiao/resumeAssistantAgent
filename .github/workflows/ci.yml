@@ -29,7 +29,7 @@ jobs:
 
       - name: Ruff lint
         working-directory: backend
-        run: ruff check app/ tests/
+        run: ruff check app/ tests/ eval/
 
       - name: Run tests with coverage gate
         working-directory: backend

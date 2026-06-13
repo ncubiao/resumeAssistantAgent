@@ -21,6 +21,7 @@ async def chat_message(
     resume_file: UploadFile | None = File(None, description="可选：上传一份简历（PDF/Word/TXT/MD/图片PNG/JPG/WEBP/BMP/GIF），其文本会作为附件上下文提供给 Agent"),
     jd_file: UploadFile | None = File(None, description="可选：上传一份岗位描述（PDF/Word/TXT/MD/图片PNG/JPG/WEBP/BMP/GIF），其文本会作为附件上下文提供给 Agent"),
     history: str | None = Form(None, description="可选：之前的对话历史，JSON 数组，每项 {\"role\": \"user\"|\"assistant\", \"content\": \"...\"}"),
+    user_role: str = Form("recruiter", description="用户身份：recruiter（招聘方，默认）或 candidate（求职者）。不同身份的 system prompt 与可用工具集不同。"),
 ) -> dict:
     """单轮聊天接口。
 
@@ -76,7 +77,12 @@ async def chat_message(
 
     # 4) 交给 Agent
     try:
-        reply = run_agent(user_message=message, context=context, history=history_objs)
+        reply = run_agent(
+            user_message=message,
+            context=context,
+            history=history_objs,
+            user_role=user_role,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("agent run failed", error=str(exc))
         raise HTTPException(status_code=500, detail=f"Agent 执行失败: {exc}") from exc
@@ -94,4 +100,5 @@ async def chat_message(
         ],
         "used_tools": reply.used_tools,
         "provider": reply.provider,
+        "user_role": reply.user_role,
     }

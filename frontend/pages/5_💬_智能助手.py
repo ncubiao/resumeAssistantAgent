@@ -35,6 +35,38 @@ with st.sidebar:
 st.title("💬 简历智能助手")
 st.caption("上传简历或岗位描述，用自然语言和 AI 对话：解析、匹配、优化，一次搞定。")
 
+# -------- 身份选择（招聘方 vs 求职者） --------
+# 同一套工具，两种系统提示词与视角：招聘方关注"候选人怎么样"，求职者关注"我怎么改进"。
+ROLE_LABELS = {
+    "recruiter": "🧑‍💼 招聘方（HR / 猎头 / 招聘经理）",
+    "candidate": "🧑‍🎓 求职者",
+}
+
+if "user_role" not in st.session_state:
+    st.session_state.user_role = "recruiter"
+
+selected_label = st.radio(
+    "你的身份",
+    list(ROLE_LABELS.values()),
+    index=list(ROLE_LABELS).index(st.session_state.user_role),
+    horizontal=True,
+    key="role_radio",
+    help="切换身份会改变 Agent 的视角与回答风格。切换后建议清空对话以避免上下文混淆。",
+)
+new_role = next(k for k, v in ROLE_LABELS.items() if v == selected_label)
+if new_role != st.session_state.user_role:
+    st.session_state.user_role = new_role
+    # 角色切换时提醒清空历史避免上下文错乱
+    if st.session_state.get("messages"):
+        st.warning("⚠️ 你切换了身份。建议点击下方「清空对话」重新开始，避免上下文与新视角不一致。")
+
+if st.session_state.user_role == "recruiter":
+    st.caption("当前视角：**招聘方**。Agent 会以专业、客观的口吻评价候选人。")
+    chat_placeholder = "例如：『帮我看看这位候选人是否适合 Python 后端岗位』"
+else:
+    st.caption("当前视角：**求职者**。Agent 会站在你的角度提供贴心建议。")
+    chat_placeholder = "例如：『帮我看看我的简历适合什么岗位、有哪些可以改进』"
+
 # -------- 上传区 --------
 with st.expander("📎 上传文件（可选）", expanded=True):
     col1, col2 = st.columns(2)
@@ -91,7 +123,7 @@ for msg in st.session_state.messages:
                 st.code(out[:2000], language="json")
 
 # 用户输入
-if user_input := st.chat_input("输入消息，比如：『帮我看看这份简历适合什么岗位』"):
+if user_input := st.chat_input(chat_placeholder):
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
@@ -123,6 +155,7 @@ if user_input := st.chat_input("输入消息，比如：『帮我看看这份简
                 jd_file=jd_bytes,
                 jd_filename=jd_name,
                 history=history,
+                user_role=st.session_state.user_role,
             )
 
         if result is None or isinstance(result, dict) and result.get("error"):

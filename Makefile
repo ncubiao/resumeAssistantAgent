@@ -1,7 +1,7 @@
 # Makefile - resumeAssistantAgent
 
 .PHONY: help install install-backend install-frontend dev dev-backend dev-frontend \
-	test lint typecheck docker-up docker-down docker-build db-init clean format
+	test eval eval-report lint typecheck docker-up docker-down docker-build db-init clean format
 
 PYTHON := python3
 VENV := .venv
@@ -40,11 +40,17 @@ dev-frontend: ## 启动前端开发服务器（本地）
 
 ## --- 测试 & 代码质量 ---
 
-test: ## 运行测试
+test: ## 运行测试（不含 eval）
 	cd backend && pytest -v --cov=app --cov-report=term-missing
 
+eval: ## 运行 Agent 质量评测（需真实 LLM Key）
+	cd backend && pytest -m eval -v -s
+
+eval-report: ## 直接打印 eval 详细对比报告（不走 pytest）
+	cd backend && python -m eval.runner
+
 lint: ## 运行 ruff 代码检查
-	cd backend && ruff check app/
+	cd backend && ruff check app/ tests/ eval/
 	cd frontend && ruff check app.py pages/ components/
 
 format: ## 使用 ruff 格式化

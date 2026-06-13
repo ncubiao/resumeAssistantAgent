@@ -181,9 +181,10 @@ class APIClient:
         jd_file: bytes | None = None,
         jd_filename: str | None = None,
         history: list[dict[str, str]] | None = None,
+        user_role: str = "recruiter",
     ) -> dict[str, Any] | None:
         try:
-            data = {"message": message}
+            data = {"message": message, "user_role": user_role}
             if history:
                 import json as _json
 

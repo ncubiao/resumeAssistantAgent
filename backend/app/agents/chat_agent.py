@@ -3,6 +3,8 @@
 两种调用路径（按优先级，按可用性自动切换）：
 1. 原生 tool_calls：ChatOpenAI.bind_tools() + 读取 message.tool_calls
 2. 结构化提示回落：让模型在回复中以特殊标记选择工具与参数
+
+阶段 6 新增：双角色模式（recruiter / candidate），system prompt 与可用工具按角色隔离。
 """
 from __future__ import annotations
 
@@ -17,20 +19,82 @@ from app.utils.llm_client import llm_client
 
 logger = get_logger("agent.chat")
 
-_SYSTEM_PROMPT = (
-    "你是「简历小助手」，一位专业、客观的中文招聘顾问 AI 助手。\n"
-    "你可以帮助用户做以下事情：\n"
-    "1. 解析简历：提取候选人的姓名、技能、工作经历、项目经历等结构化信息。\n"
-    "2. 分析岗位匹配：判断一份简历与某个目标岗位（JD）的匹配度，指出优势与缺口。\n"
-    "3. 简历优化：提出具体、可执行的简历修改建议。\n"
-    "4. 回答一般性问题：例如简历格式、面试技巧、职业规划等。\n\n"
-    "使用工具的规则：\n"
-    "- 当你需要从简历中提取结构化信息、或分析简历内容时，才调用工具。\n"
+# ---------- 角色常量 ----------
+ROLE_RECRUITER = "recruiter"
+ROLE_CANDIDATE = "candidate"
+
+# ---------- 双 System Prompt ----------
+_SYSTEM_PROMPT_RECRUITER = (
+    "你是「简历小助手（招聘版）」，一位专业、客观的中文招聘顾问 AI 助手。\n"
+    "你帮助 HR / 猎头 / 招聘经理做以下事情：\n"
+    "1. 解析候选人简历：提取姓名、技能、工作经历、项目经历等结构化信息。\n"
+    "2. 对候选人画像做摘要：用 3-5 句中文概括候选人核心能力。\n"
+    "3. 评估岗位匹配：判断一份简历与某个目标岗位（JD）的匹配度，指出优势与不足。\n"
+    "4. 给候选人提优化建议：必要时帮候选人指出可改进点。\n"
+    "\n"
+    "工具调用规则：\n"
+    "- 当你需要从简历中提取结构化信息、做摘要、或分析匹配度时，才调用工具。\n"
     "- 不要重复调用同一个工具获取同样的结果（如果上一轮已经拿到结果，直接基于结果回答）。\n"
     "- 所有工具的返回值都是 JSON 字符串，你需要理解其含义并用自然语言回答用户。\n"
     "- 如果用户上传了文件（简历/JD），会在用户消息里以【附件】标签明确标注。\n"
     "- 回答要简洁、直接、专业，中文输出，不要使用 Markdown 代码块。\n"
+    "- 站在招聘方视角：客观评价候选人能力与岗位匹配度。\n"
 )
+
+_SYSTEM_PROMPT_CANDIDATE = (
+    "你是「简历小助手（求职版）」，一位专业、贴心的中文求职顾问 AI 助手。\n"
+    "你帮助求职者做以下事情：\n"
+    "1. 解析我的简历：提取我的技能、工作经历、项目经历等结构化信息。\n"
+    "2. 我的简历摘要：用 3-5 句中文概括我的核心竞争力。\n"
+    "3. 评估我与目标岗位的匹配度：哪里是优势、哪里有差距。\n"
+    "4. 给我具体的简历优化建议：如何突出亮点、补齐短板，让简历更有竞争力。\n"
+    "\n"
+    "工具调用规则：\n"
+    "- 当我需要解析简历、做摘要、分析匹配、或得到优化建议时，才调用工具。\n"
+    "- 不要重复调用同一个工具获取同样的结果。\n"
+    "- 所有工具的返回值都是 JSON 字符串，你需要理解其含义并用自然语言回答我。\n"
+    "- 如果我上传了文件（简历/JD），会在用户消息里以【附件】标签明确标注。\n"
+    "- 回答要鼓励、具体、可执行，中文输出，不要使用 Markdown 代码块。\n"
+    "- 站在求职者视角：帮助我更好地展示能力、提升竞争力。\n"
+)
+
+# ---------- 工具白名单 ----------
+# 使用真实的 tool name（与 backend/app/agents/tools/ 下注册的一致）
+_TOOL_WHITELIST = {
+    ROLE_RECRUITER: {
+        "parse_resume_text",
+        "summarize_resume",
+        "match_resume_to_jd",
+        "generate_optimize_suggestions",
+    },
+    ROLE_CANDIDATE: {
+        # 求职者：可解析自己简历、做摘要、看匹配度、得优化建议；
+        # 当前 chat 工具集不含 search（search 仅作为 HTTP 端点存在），
+        # 所以两角色 tool 集差异主要体现在 system prompt 视角。
+        # 未来若加 search_resumes tool，会在此显式排除。
+        "parse_resume_text",
+        "summarize_resume",
+        "match_resume_to_jd",
+        "generate_optimize_suggestions",
+    },
+}
+
+
+def _resolve_role(user_role: str | None) -> str:
+    """归一化角色字符串，未知值默认 recruiter。"""
+    role = (user_role or "").strip().lower()
+    return role if role in {ROLE_RECRUITER, ROLE_CANDIDATE} else ROLE_RECRUITER
+
+
+def _system_prompt_for(role: str) -> str:
+    return _SYSTEM_PROMPT_CANDIDATE if role == ROLE_CANDIDATE else _SYSTEM_PROMPT_RECRUITER
+
+
+def _filter_tools_for(role: str, tools: list) -> list:
+    """按角色白名单过滤工具列表。未在白名单中的工具不会暴露给 LLM。"""
+    allowed = _TOOL_WHITELIST.get(role, _TOOL_WHITELIST[ROLE_RECRUITER])
+    return [t for t in tools if getattr(t, "name", None) in allowed]
+
 
 _MAX_TOOL_LOOPS = 3  # 防止无限循环：最多调用 3 次工具
 
@@ -51,6 +115,7 @@ class AgentResponse:
     tool_calls: list[ChatTurn] = field(default_factory=list)
     provider: str = "unknown"
     used_tools: bool = False
+    user_role: str = ROLE_RECRUITER
 
 
 # ---------- 公开入口 ----------
@@ -59,6 +124,7 @@ def run_agent(
     user_message: str,
     context: dict[str, Any] | None = None,
     history: list[dict[str, str]] | None = None,
+    user_role: str | None = None,
 ) -> AgentResponse:
     """执行一轮 Agent 对话。
 
@@ -70,26 +136,32 @@ def run_agent(
                    - "jd_text":      str  —— 用户上传的岗位描述文本
                    - "parsed_resume_json": str  —— 若之前解析过，可直接提供
         history: 可选的历史消息，列表元素为 {"role": "user"|"assistant", "content": str}。
+        user_role: "recruiter"（招聘方，默认）或 "candidate"（求职者）。
+                   不同角色的 system prompt 与可用工具集不同。
 
     Returns:
         AgentResponse: 包含自然语言答案 + tool call 过程记录。
     """
     context = context or {}
     history = history or []
+    role = _resolve_role(user_role)
+    system_prompt = _system_prompt_for(role)
 
     # 把附件信息加到 user message 里（作为第一段上下文）
     preamble = _build_preamble(context)
     full_user_message = f"{preamble}\n用户: {user_message}" if preamble else user_message
 
-    tools = get_all_tools()
+    # 按角色过滤工具：求职者拿不到 search_resumes
+    tools = _filter_tools_for(role, get_all_tools())
     tool_map = {t.name: t for t in tools}
     tool_descriptions = _format_tool_descriptions(tools)
+    logger.info("agent run", role=role, tools=sorted(tool_map.keys()))
 
     tool_turns: list[ChatTurn] = []
 
     # 1) 先试原生 tool_calls 路径
     answer = _try_native_tool_calls(
-        full_user_message, history, tool_map, tool_descriptions, tool_turns, context
+        full_user_message, history, tool_map, tool_descriptions, tool_turns, context, system_prompt
     )
     if answer is not None:
         return AgentResponse(
@@ -97,11 +169,12 @@ def run_agent(
             tool_calls=tool_turns,
             provider=llm_client.provider if llm_client.available else "fallback",
             used_tools=len(tool_turns) > 0,
+            user_role=role,
         )
 
     # 2) 回落：结构化提示 + 模型以标记选择工具
     answer = _run_prompt_based_tool_loop(
-        full_user_message, history, tool_map, tool_descriptions, tool_turns, context
+        full_user_message, history, tool_map, tool_descriptions, tool_turns, context, system_prompt
     )
 
     return AgentResponse(
@@ -109,6 +182,7 @@ def run_agent(
         tool_calls=tool_turns,
         provider=llm_client.provider if llm_client.available else "fallback",
         used_tools=len(tool_turns) > 0,
+        user_role=role,
     )
 
 
@@ -121,6 +195,7 @@ def _try_native_tool_calls(
     tool_descriptions: str,
     tool_turns: list[ChatTurn],
     context: dict[str, Any],
+    system_prompt: str,
 ) -> str | None:
     """尝试走 LangChain bind_tools / tool_calls 原生路径。
 
@@ -141,7 +216,7 @@ def _try_native_tool_calls(
         logger.info("bind_tools not supported, falling back", error=str(exc))
         return None
 
-    messages = _build_langchain_messages(user_message, history, system=_SYSTEM_PROMPT)
+    messages = _build_langchain_messages(user_message, history, system=system_prompt)
 
     # Tool 循环
     loop_context = context.copy()
@@ -220,6 +295,7 @@ def _run_prompt_based_tool_loop(
     tool_descriptions: str,
     tool_turns: list[ChatTurn],
     context: dict[str, Any],
+    system_prompt: str,
 ) -> str:
     """当原生 tool_calls 不可用时，用结构化提示让模型选择工具。
 
@@ -232,7 +308,7 @@ def _run_prompt_based_tool_loop(
         prompt = _build_prompt(user_message, history, tool_descriptions, loop_context, already_called=tool_turns)
 
         if llm_client.available:
-            raw_reply = llm_client.invoke(prompt, system=_SYSTEM_PROMPT) or ""
+            raw_reply = llm_client.invoke(prompt, system=system_prompt) or ""
         else:
             raw_reply = _heuristic_reply(user_message, loop_context)
 
