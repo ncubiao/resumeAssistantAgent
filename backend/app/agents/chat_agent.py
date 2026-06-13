@@ -125,6 +125,7 @@ def run_agent(
     context: dict[str, Any] | None = None,
     history: list[dict[str, str]] | None = None,
     user_role: str | None = None,
+    recalled_memories: list[str] | None = None,
 ) -> AgentResponse:
     """执行一轮 Agent 对话。
 
@@ -138,6 +139,8 @@ def run_agent(
         history: 可选的历史消息，列表元素为 {"role": "user"|"assistant", "content": str}。
         user_role: "recruiter"（招聘方，默认）或 "candidate"（求职者）。
                    不同角色的 system prompt 与可用工具集不同。
+        recalled_memories: 可选的长期记忆条目（由 API 层从记忆库召回后传入）。
+                   agent 仅负责拼进 system prompt，不触达 DB，保持可测、无副作用。
 
     Returns:
         AgentResponse: 包含自然语言答案 + tool call 过程记录。
@@ -147,6 +150,11 @@ def run_agent(
     role = _resolve_role(user_role)
     system_prompt = _system_prompt_for(role)
 
+    # 注入长期记忆（若有）：让 Agent "记得"该用户之前透露的稳定事实
+    if recalled_memories:
+        mem_block = "\n".join(f"- {m}" for m in recalled_memories)
+        system_prompt = f"{system_prompt}\n【关于该用户你已知道（长期记忆）】\n{mem_block}\n"
+
     # 把附件信息加到 user message 里（作为第一段上下文）
     preamble = _build_preamble(context)
     full_user_message = f"{preamble}\n用户: {user_message}" if preamble else user_message
@@ -155,7 +163,7 @@ def run_agent(
     tools = _filter_tools_for(role, get_all_tools())
     tool_map = {t.name: t for t in tools}
     tool_descriptions = _format_tool_descriptions(tools)
-    logger.info("agent run", role=role, tools=sorted(tool_map.keys()))
+    logger.info("agent run", role=role, tools=sorted(tool_map.keys()), memories=len(recalled_memories or []))
 
     tool_turns: list[ChatTurn] = []
 

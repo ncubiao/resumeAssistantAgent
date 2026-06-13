@@ -10,6 +10,31 @@ from components.api_client import api
 
 st.set_page_config(page_title="智能助手 | 简历小助手", page_icon="💬", layout="wide")
 
+# -------- 会话 / 用户 状态（阶段 7：记忆） --------
+# user_id 本期简单处理：进入页面时生成一个稳定 id（未来换登录态）。
+if "user_id" not in st.session_state:
+    import uuid as _uuid
+
+    st.session_state.user_id = "u-" + _uuid.uuid4().hex[:8]
+if "session_id" not in st.session_state:
+    st.session_state.session_id = None  # None=新会话，发首条消息后由后端返回
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+
+def _load_conversation(conv_id: str) -> None:
+    """从后端加载一个历史会话，恢复到当前聊天窗口。"""
+    detail = api.get_conversation(conv_id)
+    if not detail or (isinstance(detail, dict) and detail.get("error")):
+        st.error("加载会话失败")
+        return
+    st.session_state.session_id = detail["id"]
+    st.session_state.messages = [
+        {"role": m["role"], "content": m["content"], "tool_calls": m.get("tool_calls", [])}
+        for m in detail.get("messages", [])
+    ]
+
+
 # 后端地址
 default_url = os.environ.get("BACKEND_API_URL", "http://localhost:8000")
 with st.sidebar:
@@ -26,10 +51,39 @@ with st.sidebar:
                 st.error(f"❌ 后端不可用: {info}")
 
     st.divider()
+    st.subheader("🗂️ 历史会话")
+    st.caption(f"用户: `{st.session_state.user_id}`")
+    if st.button("➕ 新会话", use_container_width=True):
+        st.session_state.session_id = None
+        st.session_state.messages = []
+        st.rerun()
+
+    convs = api.list_conversations(st.session_state.user_id)
+    if convs:
+        for c in convs[:20]:
+            label = (c.get("title") or "未命名")[:22]
+            is_current = c["id"] == st.session_state.session_id
+            prefix = "🟢 " if is_current else "💬 "
+            if st.button(f"{prefix}{label}", key=f"conv_{c['id']}", use_container_width=True):
+                _load_conversation(c["id"])
+                st.rerun()
+    else:
+        st.caption("（暂无历史会话）")
+
+    st.divider()
+    st.subheader("🧠 Agent 记住的关于你")
+    memories = api.get_memories(st.session_state.user_id)
+    if memories:
+        for m in memories[:15]:
+            st.caption(f"• [{m.get('kind', 'fact')}] {m.get('content', '')}")
+    else:
+        st.caption("（还没有长期记忆，多聊几句 Agent 会记住你的画像）")
+
+    st.divider()
     st.caption("💡 使用提示")
     st.caption("1. 先上传简历/JD，或直接提问")
-    st.caption("2. 支持多轮对话，上下文自动保持")
-    st.caption("3. 可在思考过程中看到 Agent 调用了哪些工具")
+    st.caption("2. 对话自动落库，刷新/重启不丢")
+    st.caption("3. Agent 会记住你的画像，跨会话召回")
 
 
 st.title("💬 简历智能助手")
@@ -92,11 +146,11 @@ with st.expander("📎 上传文件（可选）", expanded=True):
 
 
 # -------- 聊天消息状态 --------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# （user_id / session_id / messages 已在顶部初始化）
 
-if st.button("🧹 清空对话", type="secondary"):
+if st.button("🧹 清空对话（开新会话）", type="secondary"):
     st.session_state.messages = []
+    st.session_state.session_id = None
     st.rerun()
 
 # 渲染已有消息
@@ -156,6 +210,8 @@ if user_input := st.chat_input(chat_placeholder):
                 jd_filename=jd_name,
                 history=history,
                 user_role=st.session_state.user_role,
+                user_id=st.session_state.user_id,
+                session_id=st.session_state.session_id,
             )
 
         if result is None or isinstance(result, dict) and result.get("error"):
@@ -163,11 +219,21 @@ if user_input := st.chat_input(chat_placeholder):
             st.error(msg)
             st.session_state.messages.append({"role": "assistant", "content": f"⚠️ {msg}"})
         else:
+            # 记住后端返回的 session_id（首条消息后会话才建立）
+            if result.get("session_id"):
+                st.session_state.session_id = result["session_id"]
+
             answer = result.get("answer", "") or "(空回答)"
             tool_calls = result.get("tool_calls", []) or []
             used_tools = result.get("used_tools", False)
+            recalled = result.get("recalled_memories") or []
 
             st.markdown(answer)
+
+            if recalled:
+                with st.expander(f"🧠 召回了 {len(recalled)} 条关于你的记忆"):
+                    for m in recalled:
+                        st.caption(f"• {m}")
 
             if used_tools and tool_calls:
                 for tc in tool_calls:

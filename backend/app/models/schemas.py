@@ -180,3 +180,40 @@ class AgentAnalyzeResponse(BaseModel):
     trace: list[TraceEntry] = Field(default_factory=list)
     thread_id: str
     mode: str
+
+
+# ---------- Agent 记忆（阶段 7） ----------
+
+class MessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    role: str
+    content: str = ""
+    tool_calls: list[dict] = Field(default_factory=list)
+    created_at: datetime
+
+
+class ConversationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: str = "anonymous"
+    title: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationDetailOut(ConversationOut):
+    messages: list[MessageOut] = Field(default_factory=list)
+
+
+class MemoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: str = "anonymous"
+    kind: str = "fact"
+    content: str
+    source_session: str | None = None
+    created_at: datetime

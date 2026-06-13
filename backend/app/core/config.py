@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     # deprecated：维度的单一事实来源已改为 embedding_dim，此项仅为向后兼容保留。
     vector_dim: int = 1536
 
+    # ---------- Agent 记忆（阶段 7）----------
+    memory_enabled: bool = True          # 总开关：关闭则不抽取/召回长期记忆
+    memory_recall_k: int = 3             # 每轮召回的记忆条数
+    memory_index_path: str = str(BACKEND_ROOT / "data" / "memory_index" / "memory.bin")
+    checkpoint_db_path: str = str(BACKEND_ROOT / "data" / "checkpoints.sqlite")
+
     # 文件上传
     upload_dir: str = str(BACKEND_ROOT / "data" / "uploads")
     max_file_size_mb: int = 20

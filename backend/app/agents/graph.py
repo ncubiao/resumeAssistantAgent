@@ -181,13 +181,38 @@ def _route_after_matcher(state: ResumeAnalysisState) -> str:
 _compiled_graph: Any = None
 
 
+def _build_checkpointer():
+    """优先用 SqliteSaver 持久化 checkpoint（重启后 thread 状态还在）；
+    依赖缺失时回退 MemorySaver（保持优雅降级，CI 无依赖也能跑）。
+
+    注意：SqliteSaver 需要长生命周期连接（check_same_thread=False），
+    这里持有进程级单例连接，不能用完即关。
+    """
+    try:
+        import sqlite3
+        from pathlib import Path
+
+        from langgraph.checkpoint.sqlite import SqliteSaver  # type: ignore
+
+        from app.core.config import settings
+
+        Path(settings.checkpoint_db_path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(settings.checkpoint_db_path, check_same_thread=False)
+        logger.info("using SqliteSaver checkpointer", path=settings.checkpoint_db_path)
+        return SqliteSaver(conn)
+    except Exception as exc:  # noqa: BLE001
+        from langgraph.checkpoint.memory import MemorySaver  # type: ignore
+
+        logger.warning("SqliteSaver unavailable, fallback to MemorySaver", error=str(exc))
+        return MemorySaver()
+
+
 def build_graph():
-    """构建并编译 LangGraph 图（带 MemorySaver checkpointer）。"""
+    """构建并编译 LangGraph 图（带持久化 checkpointer）。"""
     global _compiled_graph
     if _compiled_graph is not None:
         return _compiled_graph
     try:
-        from langgraph.checkpoint.memory import MemorySaver  # type: ignore
         from langgraph.graph import END, StateGraph  # type: ignore
 
         graph = StateGraph(ResumeAnalysisState)
@@ -210,9 +235,9 @@ def build_graph():
         )
         graph.add_edge("optimizer", END)
 
-        # 单进程作品集场景：MemorySaver 够用。
-        # TODO 多实例 / 持久化场景：换 SqliteSaver 或 PostgresSaver。
-        _compiled_graph = graph.compile(checkpointer=MemorySaver())
+        # SqliteSaver 持久化 checkpoint（重启后 thread 状态保留）；
+        # 多实例 / 生产场景可换 PostgresSaver。
+        _compiled_graph = graph.compile(checkpointer=_build_checkpointer())
         logger.info("agent graph compiled")
         return _compiled_graph
     except Exception as exc:  # noqa: BLE001

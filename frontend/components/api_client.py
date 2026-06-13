@@ -182,9 +182,13 @@ class APIClient:
         jd_filename: str | None = None,
         history: list[dict[str, str]] | None = None,
         user_role: str = "recruiter",
+        user_id: str = "anonymous",
+        session_id: str | None = None,
     ) -> dict[str, Any] | None:
         try:
-            data = {"message": message, "user_role": user_role}
+            data = {"message": message, "user_role": user_role, "user_id": user_id}
+            if session_id:
+                data["session_id"] = session_id
             if history:
                 import json as _json
 
@@ -205,6 +209,52 @@ class APIClient:
             return resp.json()
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
+
+    # ---------- 会话 / 记忆 ----------
+
+    def list_conversations(self, user_id: str = "anonymous") -> list[dict[str, Any]]:
+        try:
+            resp = self._session.get(
+                f"{self.base_url}/api/v1/chat/conversations",
+                params={"user_id": user_id},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            return resp.json() or []
+        except Exception:  # noqa: BLE001
+            return []
+
+    def get_conversation(self, conv_id: str) -> dict[str, Any] | None:
+        try:
+            resp = self._session.get(
+                f"{self.base_url}/api/v1/chat/conversations/{conv_id}", timeout=self.timeout
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def delete_conversation(self, conv_id: str) -> dict[str, Any] | None:
+        try:
+            resp = self._session.delete(
+                f"{self.base_url}/api/v1/chat/conversations/{conv_id}", timeout=self.timeout
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def get_memories(self, user_id: str = "anonymous") -> list[dict[str, Any]]:
+        try:
+            resp = self._session.get(
+                f"{self.base_url}/api/v1/chat/memories",
+                params={"user_id": user_id},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            return resp.json() or []
+        except Exception:  # noqa: BLE001
+            return []
 
 
 # 全局单例
